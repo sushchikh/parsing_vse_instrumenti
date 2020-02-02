@@ -9,7 +9,11 @@ import pandas as pd
 import requests
 import logging.config
 import yaml
+
 from bs4 import BeautifulSoup as bs
+from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException
+from time import sleep
 
 
 # чтение ymal-файла с настройками логирования, создание логгера
@@ -49,15 +53,15 @@ def get_prices_from_sites(price_dict):
         clear_vse_instrumenti_item_price = ''
         session = requests.Session()
 
-    # блок парсинга стройбата
+        # блок парсинга стройбата
         try:
             request = session.get(price_dict[id][1], headers=headers)
             if request.status_code == 200:
                 soup = bs(request.content, 'html.parser')
                 strbt_element_name = soup.find('h1', itemprop='name').text
                 price_dict[id][0] = strbt_element_name
-                strbt_element_price = soup.find('span', class_='price').text
-                for char in strbt_element_price:  # чистим цену от всяких знаков, ибо нефиг
+                vse_instr_item_price = soup.find('span', class_='price').text
+                for char in vse_instr_item_price:  # чистим цену от всяких знаков, ибо нефиг
                     if char.isdigit():
                         clear_strbt_item_price += char
                 price_dict[id][3] = clear_strbt_item_price
@@ -67,22 +71,38 @@ def get_prices_from_sites(price_dict):
             print(catch_exception)
             logger.error('Ошибка', catch_exception)
 
-    # блок парсинга всех инструментов
 
-        try:
-            request = session.get(price_dict[id][2], headers=headers)
-            if request.status_code == 200:
-                soup = bs(request.content, 'html.parser')
-                print('сюда дошли')
-                vse_instrumenti_price = soup.find('span', class_='price-value')#.text
-                print(vse_instrumenti_price)
-            else:
-                logger.error('Connection error in url:', price_dict[id][2])
-        except Exception as catch_exception:
-            print(catch_exception)
-            logger.error('Ошибка:', catch_exception)
+    # блок парсинга всех инструментов, пока через селениум, т.к. подгрузка сайта идет через скрипт
 
+    # # Открытие браузера и задание времени ожидания элемента на странице
+    browser = webdriver.Chrome()
+    browser.implicitly_wait(0.2)
+    try:
+        for key, value in price_dict.items():
+            browser.get(price_dict[key][2])  # заходим на каждую ссылку в списке
+            try:  # пытаемся найти элемент, если он по распродаже
+                browser.find_element_by_css_selector('span.price-value')
+                vse_instr_item_price = browser.find_element_by_css_selector('span.price-value').text
+            except NoSuchElementException:
+                logger.error('Не нашел цены в: ', price_dict[key][2])
+                
+            try:  # пытаемся найти элемент, если он не по распродаже
+                browser.find_element_by_css_selector('div.price > span.price-value')
+                vse_instr_item_price = browser.find_element_by_css_selector('div.price > span.price-value').text
+            except NoSuchElementException:
+                logger.error('Не нашел цены в: ', price_dict[key][2])
 
+            # чсистим цену от пробелов
+            vse_instr_item_price_clear = ''
+            for char in vse_instr_item_price:
+                if char.isdigit():
+                    vse_instr_item_price_clear += char
+
+            price_dict[key][4] = vse_instr_item_price_clear
+            # print(vse_instr_item_price_clear)
+    except Exception as catch_exception:  # TODO правильно прописать эксепшены
+        logger.error('Critical error', catch_exception)
+    browser.close()
 
 
 if __name__ == "__main__":
